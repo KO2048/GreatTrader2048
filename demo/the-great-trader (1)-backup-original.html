@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大作手 · The Great Trader</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:'Noto Sans SC',sans-serif;background:#0a0a0a;color:#e0e0e0}
+:root{
+  --bg:#0a0a0a;--surface2:#111212;--surface3:#1a1b1c;
+  --border:#1e2020;--border2:#2a2b2b;
+  --green:#00AD7F;--green-bg:rgba(0,173,127,.12);--green-dim:rgba(0,173,127,.7);
+  --red:#DB426B;--red-bg:rgba(219,66,107,.12);--red-dim:rgba(219,66,107,.7);
+  --gold:#FFE100;--muted:#666868;--faint:#3a3c3c;--text:#e0e0e0;
+}
+
+/* ── Layout ── */
+#app{
+  display:grid;
+  grid-template-rows:40px 22px 1fr 180px;
+  grid-template-columns:180px 1fr 300px;
+  height:100vh;width:100vw;
+  transition:grid-template-columns .22s cubic-bezier(.4,0,.2,1);
+}
+#app.sb-off{grid-template-columns:0px 1fr 300px}
+
+#topbar{grid-column:1/-1;grid-row:1;display:flex;align-items:center;background:#000;border-bottom:1px solid var(--border);padding:0 12px;gap:12px;z-index:10;overflow:hidden}
+#news-bar{grid-column:1/-1;grid-row:2;background:#0d0d0d;border-bottom:1px solid var(--border);display:flex;align-items:center;overflow:hidden}
+#sidebar{grid-column:1;grid-row:3/5;background:var(--surface2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;transition:opacity .2s ease,transform .22s cubic-bezier(.4,0,.2,1)}
+#app.sb-off #sidebar{opacity:0;pointer-events:none;transform:translateX(-10px)}
+#chart-wrap{grid-column:2;grid-row:3;background:var(--bg);position:relative;overflow:hidden}
+#trade-panel{grid-column:3;grid-row:3;background:var(--surface2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+#bottom-bar{grid-column:2/4;grid-row:4;background:var(--surface2);border-top:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Topbar ── */
+.tb-logo{font-size:15px;font-weight:700;color:#fff;white-space:nowrap;letter-spacing:-.3px}
+.tb-sep{width:1px;height:18px;background:var(--border2);flex-shrink:0}
+.tb-asset-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0}
+.tb-price{font-size:15px;font-weight:700}
+.tb-stat{font-size:11px;color:var(--muted);white-space:nowrap}
+.tb-val{font-size:11px;font-weight:500}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.tb-bal{font-size:12px;font-weight:600}
+.tb-bal span{color:var(--muted);font-weight:400}
+
+/* ── News bar ── */
+#news-scroll{white-space:nowrap;animation:scroll-x 60s linear infinite;font-size:10px;color:var(--muted);padding-left:100%;display:inline-block}
+.ni.bull{color:var(--green)}.ni.bear{color:var(--red)}.ni.neutral{color:var(--muted)}
+.ni{margin-right:40px}
+@keyframes scroll-x{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+
+/* ── Sidebar toggle ── */
+#sb-toggle{
+  position:absolute;right:-14px;top:50%;transform:translateY(-50%);
+  width:14px;height:44px;background:var(--surface2);
+  border:1px solid var(--border);border-left:none;
+  border-radius:0 4px 4px 0;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  z-index:30;transition:background .12s;
+}
+#sb-toggle:hover{background:var(--surface3)}
+#sb-toggle svg{transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#app.sb-off #sb-toggle svg{transform:rotate(180deg)}
+
+/* ── Sidebar ── */
+.sl-head{padding:6px 10px;border-bottom:1px solid var(--border);font-size:10px;color:var(--muted);font-weight:500;letter-spacing:.5px;text-transform:uppercase}
+.asset-item{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .1s;position:relative}
+.asset-item:hover{background:rgba(255,255,255,.03)}
+.asset-item.active{background:rgba(255,255,255,.05)}
+.ai-left{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.ai-name{font-size:12px;font-weight:600}
+.ai-mcap{font-size:10px;color:var(--muted)}
+.ai-right{margin-left:auto;text-align:right;flex-shrink:0}
+.ai-price{font-size:11px}
+.ai-status{font-size:10px;color:var(--muted)}
+
+/* ── Chart ── */
+#chart-canvas{display:block;width:100%;height:100%;position:absolute;inset:0}
+#combo-badge{position:absolute;top:8px;left:8px;display:none;flex-direction:column;align-items:center}
+.cb-x{font-size:22px;font-weight:700;color:var(--gold);text-shadow:0 0 20px var(--gold)}
+.cb-l{font-size:9px;color:var(--muted);letter-spacing:1px}
+#news-popup{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:var(--surface3);border:1px solid var(--border2);border-radius:6px;padding:8px 14px;max-width:360px;z-index:50;display:none;box-shadow:0 8px 32px rgba(0,0,0,.7);pointer-events:none;font-size:11px;text-align:center}
+.kbd-hint{position:absolute;bottom:8px;right:8px;font-size:9px;color:var(--faint);pointer-events:none;text-align:right;line-height:1.6}
+
+/* ── Trade Panel ── */
+.tp-half{flex:1;overflow-y:auto;min-height:0;display:flex;flex-direction:column}
+.tp-dir-header{padding:5px 8px;font-size:11px;font-weight:700;letter-spacing:.5px;flex-shrink:0}
+.tp-dir-header.long{color:var(--green);border-top:2px solid var(--green)}
+.tp-dir-header.short{color:var(--red);border-top:2px solid var(--red)}
+.tp-head-row{display:grid;grid-template-columns:38px 50px 52px 52px 52px;padding:3px 6px 2px;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);flex-shrink:0}
+.tp-rows{flex:1;overflow-y:auto}
+.tp-row{display:grid;grid-template-columns:38px 50px 52px 52px 52px;align-items:center;padding:0 6px;height:30px;border-bottom:1px solid var(--border);transition:background .1s}
+.tp-row:hover{background:rgba(255,255,255,.03)}
+.tp-lev{font-size:11px;font-weight:600;color:var(--red)}
+.tp-pmax{font-size:10px;color:var(--muted)}
+.tp-pmax.hot{color:var(--gold);font-weight:600}
+.tp-btn{width:44px;height:22px;border:none;border-radius:3px;font-size:10px;font-weight:600;cursor:pointer;transition:background .1s}
+.tp-btn.long-btn{background:var(--green-bg);color:var(--green)}
+.tp-btn.long-btn:hover{background:var(--green-dim);color:#fff}
+.tp-btn.short-btn{background:var(--red-bg);color:var(--red)}
+.tp-btn.short-btn:hover{background:var(--red-dim);color:#fff}
+
+/* ── Bottom bar ── */
+.pos-tabs{display:flex;border-bottom:1px solid var(--border);align-items:center;flex-shrink:0}
+.pos-tab{padding:5px 12px;font-size:11px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.pos-tab.active{color:var(--text);border-color:var(--text)}
+.pos-actions{margin-left:auto;padding-right:8px}
+.pos-head-row{display:grid;grid-template-columns:55px 38px 38px 58px 68px 68px 1fr 52px 52px;padding:3px 8px;border-bottom:1px solid var(--border);font-size:9px;color:var(--muted);flex-shrink:0}
+.pos-list{flex:1;overflow-y:auto}
+.pos-item{display:grid;grid-template-columns:55px 38px 38px 58px 68px 68px 1fr 52px 52px;align-items:center;padding:2px 8px;border-bottom:1px solid var(--border);height:30px;transition:background .1s}
+.pos-item:hover{background:rgba(255,255,255,.02)}
+.pc{font-size:10px;text-align:right;font-variant-numeric:tabular-nums}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.p-dir{display:inline-block;padding:1px 4px;border-radius:2px;font-size:9px;font-weight:600}
+.p-dir.long{background:var(--green-bg);color:var(--green)}
+.p-dir.short{background:var(--red-bg);color:var(--red)}
+.p-btn{height:20px;border:none;border-radius:2px;font-size:9px;cursor:pointer;padding:0 5px;font-family:inherit}
+.p-btn.rev{background:rgba(255,225,0,.12);color:var(--gold)}
+.p-btn.close{background:var(--red-bg);color:var(--red)}
+.empty-msg{padding:20px;text-align:center;color:var(--muted);font-size:11px}
+
+/* ── Pmax overlay ── */
+#pmax-overlay{position:fixed;inset:0;pointer-events:none;z-index:100;display:none}
+#pmax-canvas{width:100%;height:100%}
+#pmax-banner{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;pointer-events:none;z-index:101;display:none}
+.pmax-t{font-size:52px;font-weight:700;color:var(--gold);text-shadow:0 0 30px var(--gold),0 0 60px rgba(255,225,0,.4);animation:pp .35s cubic-bezier(.17,.67,.35,1.3)}
+.pmax-s{font-size:16px;color:#fff;margin-top:6px;animation:pp .35s .08s cubic-bezier(.17,.67,.35,1.3) both}
+@keyframes pp{from{opacity:0;transform:scale(.5)}to{opacity:1;transform:scale(1)}}
+#liq-flash{position:fixed;inset:0;background:rgba(219,66,107,.25);pointer-events:none;z-index:99;display:none;animation:lf .4s ease-out}
+@keyframes lf{0%{opacity:1}100%{opacity:0}}
+
+/* ── Misc ── */
+button{cursor:pointer;font-family:inherit}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--faint);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Topbar -->
+  <header id="topbar">
+    <div class="tb-logo">大作手</div>
+    <div class="tb-sep"></div>
+    <div class="tb-asset-icon" id="t-icon">B</div>
+    <div style="display:flex;flex-direction:column;gap:0">
+      <div style="font-size:10px;color:var(--muted)" id="t-pair">BTC/USDT</div>
+      <div class="tb-price" id="t-price">$40,440</div>
+    </div>
+    <div class="tb-val" id="t-chg" style="color:var(--green)">+1.10%</div>
+    <div class="tb-sep"></div>
+    <div class="tb-stat">市值 <span class="tb-val" id="t-mcap">$780B</span></div>
+    <div class="tb-stat">24h量 <span class="tb-val" id="t-vol">$42B</span></div>
+    <div class="tb-stat" id="t-level">关卡 1/5 · BTC大牛市</div>
+    <div class="tb-right">
+      <div class="tb-bal"><span>余额 </span><span id="bal-val" style="color:#fff">$1000.00</span></div>
+      <div class="tb-bal"><span>浮盈 </span><span id="float-val" style="color:var(--green)">+$0.00</span></div>
+      <div class="tb-bal"><span>已实现 </span><span id="real-val" style="color:var(--green)">+$0.00</span></div>
+    </div>
+  </header>
+
+  <!-- News bar (top) -->
+  <div id="news-bar">
+    <div id="news-scroll"></div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sl-head" style="position:relative">
+      热门资产
+      <button id="sb-toggle" onclick="toggleSB()" title="收起/展开">
+        <svg width="8" height="12" viewBox="0 0 8 12" fill="none">
+          <polyline points="6,1 2,6 6,11" stroke="#666868" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+    <div id="asset-list"></div>
+    <div style="margin-top:auto;padding:8px;font-size:10px;color:var(--faint);line-height:1.8;border-top:1px solid var(--border)">
+      <div>↑ 做多 5x $10</div>
+      <div>↓ 做空 5x $10</div>
+      <div>ESC 一键平仓</div>
+    </div>
+  </aside>
+
+  <!-- Chart -->
+  <main id="chart-wrap">
+    <canvas id="chart-canvas"></canvas>
+    <div id="combo-badge"><div class="cb-x" id="cb-x">2x</div><div class="cb-l">COMBO</div></div>
+    <div id="news-popup"></div>
+    <div class="kbd-hint">↑多 ↓空 ESC平仓</div>
+  </main>
+
+  <!-- Trade Panel: top=开多, bottom=开空 -->
+  <aside id="trade-panel">
+    <div class="tp-half">
+      <div class="tp-dir-header long">开多</div>
+      <div class="tp-head-row"><span>杠杆</span><span>Pmax%</span><span>$5</span><span>$10</span><span>$20</span></div>
+      <div class="tp-rows" id="tp-long"></div>
+    </div>
+    <div class="tp-half">
+      <div class="tp-dir-header short">开空</div>
+      <div class="tp-head-row"><span>杠杆</span><span>Pmax%</span><span>$5</span><span>$10</span><span>$20</span></div>
+      <div class="tp-rows" id="tp-short"></div>
+    </div>
+  </aside>
+
+  <!-- Bottom bar -->
+  <section id="bottom-bar">
+    <div class="pos-tabs">
+      <div class="pos-tab active" onclick="setPosTab('open')">当前持仓 (<span id="oc">0</span>)</div>
+      <div class="pos-tab" onclick="setPosTab('hist')">历史记录</div>
+      <div class="pos-actions">
+        <button onclick="closeAll()" style="font-size:10px;padding:3px 10px;background:var(--red-bg);color:var(--red);border:none;border-radius:3px">一键平仓</button>
+      </div>
+    </div>
+    <div class="pos-head-row">
+      <span style="text-align:left">合约</span><span>方向</span><span>杠杆</span><span>保证金</span><span>开仓价</span><span>当前价</span><span>PNL</span><span>反手</span><span>平仓</span>
+    </div>
+    <div class="pos-list" id="pos-list"></div>
+  </section>
+
+</div>
+
+<!-- Pmax FX -->
+<div id="pmax-overlay"><canvas id="pmax-canvas"></canvas></div>
+<div id="pmax-banner"><div class="pmax-t" id="pm-t">PMAX!</div><div class="pmax-s" id="pm-s"></div></div>
+<div id="liq-flash"></div>
+
+<script>
+// ── Game data ──
+const LEVELS=[
+  {asset:'BTC',pair:'BTC/USDT',icon:'B',icol:'#F7931A',mcap:'$780B',vol:'$42B',startP:40440,
+   phases:[{n:20,t:.8,v:.012,msg:'比特币突破40,000美元关键阻力',tp:'bull'},{n:15,t:.5,v:.018,msg:'ETF申请获SEC审查预期升温',tp:'bull'},{n:10,t:-.3,v:.025,msg:'部分机构获利了结，短线回调',tp:'bear'},{n:20,t:1.2,v:.015,msg:'MicroStrategy再次大幅增持BTC',tp:'bull'},{n:15,t:.9,v:.020,msg:'比特币半减期倒计时<30天',tp:'bull'},{n:10,t:-.4,v:.022,msg:'矿工抛压显现，注意风险',tp:'bear'},{n:20,t:1.5,v:.018,msg:'现货ETF日流入突破10亿美元！',tp:'bull'}]},
+  {asset:'GOLD',pair:'GOLD/USDT',icon:'Au',icol:'#D4AF37',mcap:'$180B',vol:'$12B',startP:2180,
+   phases:[{n:20,t:.4,v:.008,msg:'地缘局势升温，黄金避险需求增加',tp:'bull'},{n:15,t:.6,v:.010,msg:'美联储暗示降息路径，黄金受益',tp:'bull'},{n:10,t:-.2,v:.012,msg:'美元指数反弹，黄金短线承压',tp:'bear'},{n:20,t:.8,v:.009,msg:'央行购金数据创历史新高',tp:'bull'},{n:15,t:1.0,v:.011,msg:'黄金突破2,400美元，历史新高！',tp:'bull'},{n:10,t:-.3,v:.015,msg:'风险偏好回升，黄金阶段性调整',tp:'bear'},{n:20,t:.5,v:.010,msg:'通胀数据超预期，黄金再度走强',tp:'bull'}]},
+  {asset:'WTI',pair:'WTI/USDT',icon:'🛢',icol:'#8B4513',mcap:'$8.5B',vol:'$5B',startP:18,
+   phases:[{n:15,t:-.8,v:.025,msg:'新冠疫情导致需求暴跌，原油承压',tp:'bear'},{n:10,t:-1.5,v:.040,msg:'沙特增产，价格战加剧市场恐慌',tp:'bear'},{n:8,t:-2.5,v:.060,msg:'库欣库容即将耗尽，持有成本爆炸',tp:'bear'},{n:6,t:-5.0,v:.100,msg:'⚠️ WTI 5月合约到期！逼空风险极高',tp:'bear'},{n:5,t:-8.0,v:.150,msg:'🚨 历史首次！WTI原油跌入负值区间',tp:'bear'},{n:15,t:3.0,v:.080,msg:'OPEC+紧急减产协议，原油暴力反弹',tp:'bull'},{n:15,t:2.0,v:.050,msg:'需求预期恢复，油价逐步修复',tp:'bull'}]},
+  {asset:'ETH',pair:'ETH/USDT',icon:'Ξ',icol:'#627EEA',mcap:'$18B',vol:'$8B',startP:3200,
+   phases:[{n:20,t:.6,v:.015,msg:'Layer2生态TVL突破200亿美元',tp:'bull'},{n:15,t:1.0,v:.020,msg:'Dencun升级成功，Gas费大幅降低',tp:'bull'},{n:10,t:-.5,v:.025,msg:'监管不确定性，ETH短线回调整固',tp:'bear'},{n:20,t:1.3,v:.018,msg:'ETH ETF资金流入创单周新高',tp:'bull'},{n:15,t:.8,v:.022,msg:'质押率再创新高，市场流通减少',tp:'bull'},{n:10,t:-.6,v:.028,msg:'DeFi协议发现漏洞，短线避险',tp:'bear'},{n:20,t:1.5,v:.020,msg:'ETH突破前高，FOMO情绪高涨',tp:'bull'}]},
+  {asset:'NDX',pair:'NDX/USDT',icon:'$',icol:'#1565C0',mcap:'$320B',vol:'$25B',startP:17800,
+   phases:[{n:20,t:.5,v:.010,msg:'AI投资热潮持续，科技股走强',tp:'bull'},{n:15,t:.8,v:.012,msg:'英伟达财报超预期，带动科技板块',tp:'bull'},{n:10,t:-.4,v:.018,msg:'美联储鹰派言论，成长股承压',tp:'bear'},{n:20,t:.9,v:.014,msg:'科技巨头AI资本支出大幅增加',tp:'bull'},{n:15,t:1.1,v:.016,msg:'就业数据良好，软着陆预期升温',tp:'bull'},{n:10,t:-.5,v:.022,msg:'估值过高担忧引发获利了结',tp:'bear'},{n:20,t:1.3,v:.015,msg:'纳指突破历史新高，牛市延续',tp:'bull'}]},
+];
+
+const LEVROWS=[{l:1,p:5100},{l:2,p:300},{l:5,p:100},{l:10,p:50},{l:20,p:300},{l:50,p:300}];
+const AMTS=[5,10,20];
+
+// ── State ──
+const G={
+  bal:1000,realized:0,positions:[],history:[],
+  candles:[],price:0,ri:0,
+  pmaxN:0,combo:0,maxCombo:0,pid:0,
+  tick:0,paused:false,ptab:'open',startBal:1000
+};
+let phI=0,phB=0;
+
+// ── Canvas ──
+const cv=document.getElementById('chart-canvas');
+const cx=cv.getContext('2d');
+const MV=110;
+
+function fp(n){
+  if(Math.abs(n)>=1000)return'$'+n.toLocaleString('en',{minimumFractionDigits:0,maximumFractionDigits:0});
+  if(Math.abs(n)>=10)return'$'+n.toFixed(2);
+  return'$'+n.toFixed(3);
+}
+
+function curPh(){return LEVELS[G.ri].phases[Math.min(phI,LEVELS[G.ri].phases.length-1)];}
+
+function genCandle(prev){
+  const ph=curPh();
+  const p=prev||LEVELS[G.ri].startP;
+  const drift=ph.t*ph.v*p*0.08;
+  const noise=(Math.random()-.5)*ph.v*p;
+  const body=drift+noise;
+  const o=p;
+  const c=Math.max(o+body, o*0.001);
+  const wickH=Math.abs(body)*(.3+Math.random()*.7);
+  const wickL=Math.abs(body)*(.3+Math.random()*.7);
+  const h=Math.max(o,c)+wickH;
+  const l=Math.min(o,c)-wickL;
+  return{o,h,l,c:Math.max(c,l+0.001)};
+}
+
+function advPh(){
+  phB++;
+  const ph=curPh();
+  if(phB>=ph.n){
+    phB=0;phI++;
+    const lv=LEVELS[G.ri];
+    if(phI<lv.phases.length)showNews(lv.phases[phI].msg,lv.phases[phI].tp);
+    if(phI>=lv.phases.length)endRound();
+  }
+}
+
+function showNews(txt,tp){
+  const pop=document.getElementById('news-popup');
+  const col=tp==='bull'?'var(--green)':tp==='bear'?'var(--red)':'var(--muted)';
+  pop.style.cssText=`display:block;border-color:${col};color:${col}`;
+  pop.textContent=txt;
+  clearTimeout(pop._t);
+  pop._t=setTimeout(()=>pop.style.display='none',2500);
+}
+
+function rz(){
+  const a=document.getElementById('chart-wrap');
+  cv.width=a.clientWidth;cv.height=a.clientHeight;
+}
+
+function p2y(p,lo,hi,H){return H*0.92-(p-lo)/(hi-lo||1)*H*0.78;}
+
+function draw(){
+  const W=cv.width,H=cv.height;
+  cx.clearRect(0,0,W,H);
+  const vis=G.candles.slice(-MV);
+  if(!vis.length)return;
+  const lo=Math.min(...vis.map(c=>c.l));
+  const hi=Math.max(...vis.map(c=>c.h));
+  const pad=(hi-lo)*.1||1;
+  const lo2=lo-pad,hi2=hi+pad;
+  const cw=Math.max(4,Math.floor(W/MV)-1);
+  const gap=Math.floor(W/MV);
+
+  // price levels
+  cx.strokeStyle='rgba(255,255,255,.04)';cx.lineWidth=1;
+  for(let i=0;i<5;i++){
+    const y=H*.08+i*(H*.78/4);
+    cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke();
+    const pv=hi2-(hi2-lo2)*(i/(4));
+    cx.fillStyle='rgba(255,255,255,.25)';cx.font='9px Noto Sans SC';
+    cx.fillText(fp(pv),3,y-2);
+  }
+
+  // volume bars
+  const volMax=Math.max(...vis.map(c=>Math.abs(c.c-c.o)));
+  vis.forEach((c,i)=>{
+    const x=i*gap;
+    const bull=c.c>=c.o;
+    const vH=Math.max(1,(Math.abs(c.c-c.o)/volMax||0)*H*.06);
+    cx.fillStyle=bull?'rgba(0,173,127,.3)':'rgba(219,66,107,.3)';
+    cx.fillRect(x,H-vH,cw,vH);
+  });
+
+  // MA
+  function dma(n,col){
+    const mas=vis.map((_,i)=>{
+      if(i<n-1)return null;
+      return vis.slice(i-n+1,i+1).reduce((s,c)=>s+c.c,0)/n;
+    });
+    cx.beginPath();cx.strokeStyle=col;cx.lineWidth=1;cx.setLineDash([]);
+    let started=false;
+    mas.forEach((m,i)=>{
+      if(m===null)return;
+      const x=i*gap+cw/2;const y=p2y(m,lo2,hi2,H);
+      if(!started){cx.moveTo(x,y);started=true;}else cx.lineTo(x,y);
+    });
+    cx.stroke();
+  }
+  dma(7,'rgba(100,160,255,.7)');
+  dma(25,'rgba(255,165,0,.6)');
+
+  // candles
+  vis.forEach((c,i)=>{
+    const x=i*gap;
+    const bull=c.c>=c.o;
+    const col=bull?'#00AD7F':'#DB426B';
+    const yH=p2y(c.h,lo2,hi2,H),yL=p2y(c.l,lo2,hi2,H);
+    const yO=p2y(c.o,lo2,hi2,H),yC=p2y(c.c,lo2,hi2,H);
+    cx.strokeStyle=col;cx.lineWidth=1;cx.setLineDash([]);
+    cx.beginPath();cx.moveTo(x+cw/2,yH);cx.lineTo(x+cw/2,yL);cx.stroke();
+    cx.fillStyle=col;
+    const top=Math.min(yO,yC),bh=Math.max(1,Math.abs(yO-yC));
+    cx.fillRect(x,top,cw,bh);
+  });
+
+  // position entry lines
+  G.positions.forEach(pos=>{
+    if(!pos.pmaxHit){
+      const y=p2y(pos.ep,lo2,hi2,H);
+      cx.strokeStyle=pos.dir==='long'?'rgba(0,173,127,.5)':'rgba(219,66,107,.5)';
+      cx.lineWidth=1;cx.setLineDash([4,3]);
+      cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke();
+      cx.setLineDash([]);
+    }
+  });
+
+  // current price label
+  if(G.price){
+    const y=p2y(G.price,lo2,hi2,H);
+    cx.strokeStyle='rgba(255,225,0,.6)';cx.lineWidth=1;cx.setLineDash([3,3]);
+    cx.beginPath();cx.moveTo(0,y);cx.lineTo(W-75,y);cx.stroke();
+    cx.setLineDash([]);
+    cx.fillStyle='rgba(255,225,0,.85)';
+    cx.font='bold 10px Noto Sans SC';
+    cx.fillText(fp(G.price),W-73,y+3);
+  }
+}
+
+// ── Positions ──
+function openPos(lev,margin,dir){
+  if(G.bal<margin){flashMsg('余额不足','#DB426B');return;}
+  G.bal-=margin;
+  const pm=LEVROWS.find(r=>r.l===lev)?.p||100;
+  const pos={id:++G.pid,asset:LEVELS[G.ri].asset,dir,lev,margin,ep:G.price,sz:(margin*lev)/G.price,pmaxPct:pm,pmaxHit:false};
+  G.positions.push(pos);
+  updateUI();
+}
+
+function cpnl(pos){
+  const d=G.price-pos.ep;
+  return (pos.dir==='long'?d:-d)*pos.sz;
+}
+function cpct(pos){return(cpnl(pos)/pos.margin)*100;}
+
+function closePos(id,silent=false){
+  const i=G.positions.findIndex(p=>p.id===id);
+  if(i<0)return;
+  const pos=G.positions.splice(i,1)[0];
+  const pnl=cpnl(pos);
+  G.bal+=pos.margin+pnl;
+  G.realized+=pnl;
+  G.history.unshift({...pos,cp:G.price,pnl,ct:new Date().toLocaleTimeString()});
+  if(!silent)G.combo=0;
+  updateUI();
+}
+
+function revPos(id){
+  const pos=G.positions.find(p=>p.id===id);
+  if(!pos)return;
+  const nd=pos.dir==='long'?'short':'long',m=pos.margin,l=pos.lev;
+  closePos(id,true);
+  openPos(l,m,nd);
+}
+
+function closeAll(){const ids=G.positions.map(p=>p.id);ids.forEach(id=>closePos(id));}
+
+function chkPmax(){
+  G.positions.filter(p=>!p.pmaxHit).forEach(pos=>{
+    const pct=cpct(pos);
+    if(pct<=-100){liq(pos);return;}
+    if(pct>=pos.pmaxPct){
+      pos.pmaxHit=true;G.pmaxN++;G.combo++;
+      G.maxCombo=Math.max(G.maxCombo,G.combo);
+      trigPmax(pos,pct);
+    }
+  });
+}
+
+function liq(pos){
+  const i=G.positions.indexOf(pos);
+  if(i<0)return;
+  G.positions.splice(i,1);
+  G.history.unshift({...pos,cp:G.price,pnl:-pos.margin,ct:new Date().toLocaleTimeString()});
+  G.combo=0;
+  const fl=document.getElementById('liq-flash');
+  fl.style.display='block';setTimeout(()=>fl.style.display='none',400);
+  flashMsg('爆仓','#DB426B');
+  updateUI();
+}
+
+// ── Pmax FX ──
+const pmc=document.getElementById('pmax-canvas'),pmx=pmc.getContext('2d');
+let pts=[];
+function trigPmax(pos,pct){
+  const b=document.getElementById('pmax-banner');
+  document.getElementById('pm-t').textContent=`PMAX ×${G.combo}`;
+  document.getElementById('pm-s').textContent=`${pos.dir==='long'?'多':'空'}${pos.lev}x · +${pct.toFixed(0)}%${G.combo>1?' 🔥连击'+G.combo+'!':''}`;
+  b.style.display='block';
+  setTimeout(()=>{b.style.display='none';closePos(pos.id);},1200);
+  launch('gold');updCombo();
+}
+function launch(type){
+  pmc.width=window.innerWidth;pmc.height=window.innerHeight;
+  document.getElementById('pmax-overlay').style.display='block';
+  for(let i=0;i<120;i++){
+    const a=Math.random()*Math.PI*2,sp=2+Math.random()*6;
+    pts.push({x:window.innerWidth/2,y:window.innerHeight/2,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-3,
+      life:1,col:`hsl(${45+Math.random()*30},100%,${55+Math.random()*20}%)`,r:2+Math.random()*3});
+  }
+  animPts();
+}
+function animPts(){
+  pmx.clearRect(0,0,pmc.width,pmc.height);
+  pts=pts.filter(p=>p.life>0);
+  pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=.15;p.life-=.018;pmx.globalAlpha=p.life;pmx.fillStyle=p.col;pmx.beginPath();pmx.arc(p.x,p.y,p.r,0,Math.PI*2);pmx.fill();});
+  pmx.globalAlpha=1;
+  if(pts.length>0)requestAnimationFrame(animPts);
+  else document.getElementById('pmax-overlay').style.display='none';
+}
+
+function updCombo(){
+  const b=document.getElementById('combo-badge');
+  if(G.combo>1){b.style.display='flex';document.getElementById('cb-x').textContent=G.combo+'x';}
+  else b.style.display='none';
+}
+
+function flashMsg(t,col){
+  const d=document.createElement('div');
+  d.style.cssText=`position:fixed;top:60px;left:50%;transform:translateX(-50%);background:${col};color:#fff;padding:4px 14px;border-radius:4px;font-size:12px;font-weight:600;z-index:200;pointer-events:none;animation:pp .25s ease`;
+  d.textContent=t;document.body.appendChild(d);
+  setTimeout(()=>d.remove(),1000);
+}
+
+// ── UI ──
+function updateUI(){
+  const lv=LEVELS[G.ri];
+  document.getElementById('t-price').textContent=fp(G.price);
+  const fc=G.candles[0];
+  const ch=fc?((G.price-fc.o)/fc.o*100).toFixed(2):'0.00';
+  const chEl=document.getElementById('t-chg');
+  chEl.textContent=(ch>=0?'+':'')+ch+'%';
+  chEl.style.color=ch>=0?'var(--green)':'var(--red)';
+
+  document.getElementById('bal-val').textContent='$'+G.bal.toFixed(2);
+  const fp2=G.positions.reduce((s,p)=>s+cpnl(p),0);
+  const fEl=document.getElementById('float-val');
+  fEl.textContent=(fp2>=0?'+':'')+fp2.toFixed(2).replace(/^-/,'-$').replace(/^\+/,'$+').replace('$+','+'+'$');
+  fEl.textContent=(fp2>=0?'+$':'-$')+Math.abs(fp2).toFixed(2);
+  fEl.style.color=fp2>=0?'var(--green)':'var(--red)';
+  const rEl=document.getElementById('real-val');
+  rEl.textContent=(G.realized>=0?'+$':'-$')+Math.abs(G.realized).toFixed(2);
+  rEl.style.color=G.realized>=0?'var(--green)':'var(--red)';
+
+  document.getElementById('oc').textContent=G.positions.length;
+
+  const pl=document.getElementById('pos-list');
+  if(G.ptab==='open'){
+    if(!G.positions.length){pl.innerHTML='<div class="empty-msg">暂无持仓 · 选择方向和金额开仓</div>';return;}
+    pl.innerHTML=G.positions.map(pos=>{
+      const pnl=cpnl(pos),pct=cpct(pos);
+      return`<div class="pos-item">
+        <div class="pc" style="text-align:left;font-weight:500">${pos.asset}</div>
+        <div class="pc"><span class="p-dir ${pos.dir}">${pos.dir==='long'?'多':'空'}</span></div>
+        <div class="pc" style="color:var(--muted)">${pos.lev}x</div>
+        <div class="pc">$${pos.margin}</div>
+        <div class="pc">${fp(pos.ep)}</div>
+        <div class="pc">${fp(G.price)}</div>
+        <div class="pc p-pnl ${pnl>=0?'pos':'neg'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}<br><span style="font-size:9px;opacity:.7">${pct>=0?'+':''}${pct.toFixed(1)}%</span></div>
+        <div class="pc"><button class="p-btn rev" onclick="revPos(${pos.id})">反手</button></div>
+        <div class="pc"><button class="p-btn close" onclick="closePos(${pos.id})">平仓</button></div>
+      </div>`;
+    }).join('');
+  } else {
+    pl.innerHTML=G.history.slice(0,30).map(pos=>`<div class="pos-item" style="opacity:.6">
+      <div class="pc" style="text-align:left">${pos.asset}</div>
+      <div class="pc"><span class="p-dir ${pos.dir}">${pos.dir==='long'?'多':'空'}</span></div>
+      <div class="pc" style="color:var(--muted)">${pos.lev}x</div>
+      <div class="pc">$${pos.margin}</div>
+      <div class="pc">${fp(pos.ep)}</div>
+      <div class="pc">${fp(pos.cp||0)}</div>
+      <div class="pc ${pos.pnl>=0?'pos':'neg'}">${pos.pnl>=0?'+':''}$${pos.pnl.toFixed(2)}</div>
+      <div class="pc" style="color:var(--muted);font-size:9px">${pos.ct||''}</div>
+      <div class="pc"></div>
+    </div>`).join('') || '<div class="empty-msg">暂无历史记录</div>';
+  }
+}
+
+function setPosTab(t){
+  G.ptab=t;
+  document.querySelectorAll('.pos-tab').forEach((el,i)=>el.className='pos-tab'+(['open','hist'][i]===t?' active':''));
+  updateUI();
+}
+
+function buildSidebar(){
+  document.getElementById('asset-list').innerHTML=LEVELS.map((lv,i)=>`
+    <div class="asset-item${i===G.ri?' active':''}" onclick="selectLevel(${i})">
+      <div class="tb-asset-icon" style="background:${lv.icol}22;color:${lv.icol};font-size:${lv.icon.length>1?'9px':'12px'}">${lv.icon}</div>
+      <div class="ai-left">
+        <div class="ai-name">${lv.asset}</div>
+        <div class="ai-mcap">${lv.mcap}</div>
+      </div>
+      <div class="ai-right">
+        <div class="ai-price">${i===G.ri?fp(G.price):''}</div>
+        <div class="ai-status">${i<G.ri?'✓完成':i===G.ri?'▶进行中':'🔒'}</div>
+      </div>
+    </div>`).join('');
+}
+
+function buildTP(){
+  const rowHTML=d=>LEVROWS.map(r=>`
+    <div class="tp-row">
+      <div class="tp-lev">${r.l}x</div>
+      <div class="tp-pmax${r.p>=100?' hot':''}">${r.p}%</div>
+      ${AMTS.map(a=>`<div><button class="tp-btn ${d}-btn" onclick="openPos(${r.l},${a},'${d}')">$${a}</button></div>`).join('')}
+    </div>`).join('');
+  document.getElementById('tp-long').innerHTML=rowHTML('long');
+  document.getElementById('tp-short').innerHTML=rowHTML('short');
+}
+
+function buildTicker(){
+  const items=[
+    {t:'Gas费降至历史低位',c:'bull'},{t:'英伟达财报超预期，AI板块全线上涨',c:'bull'},
+    {t:'比特币减半事件历史上均带来牛市行情',c:'neutral'},{t:'BTC现货ETF日净流入突破10亿美元',c:'bull'},
+    {t:'美联储官员：不急于降息，关注通胀数据',c:'bear'},{t:'沙特阿美宣布增加原油产量',c:'bear'},
+    {t:'央行黄金储备连续第15个月增加',c:'bull'},{t:'DXY美元指数创年内新高',c:'bear'},
+    {t:'OPEC+会议推迟，油市震荡',c:'neutral'},{t:'以太坊质押率突破历史新高',c:'bull'},
+  ];
+  document.getElementById('news-scroll').innerHTML=[...items,...items].map(n=>`<span class="ni ${n.c}">● ${n.t}</span>`).join(' ');
+}
+
+function selectLevel(idx){
+  if(idx>G.ri)return;
+  if(idx===G.ri)return;
+}
+
+function initRound(idx){
+  G.ri=idx;phI=0;phB=0;
+  G.positions=[];G.realized=0;
+  G.pmaxN=0;G.combo=0;G.maxCombo=0;
+  G.candles=[];G.paused=false;G.tick=0;
+  G.price=LEVELS[idx].startP;
+  const lv=LEVELS[idx];
+  document.getElementById('t-pair').textContent=lv.pair;
+  document.getElementById('t-mcap').textContent=lv.mcap;
+  document.getElementById('t-vol').textContent=lv.vol;
+  document.getElementById('t-level').textContent=`关卡 ${idx+1}/5 · ${lv.asset}${idx===2?'负价格事件':idx===0?'大牛市':idx===1?'黄金避险':idx===3?'生态爆发':'科技牛市'}`;
+  const icon=document.getElementById('t-icon');
+  icon.textContent=lv.icon;icon.style.background=lv.icol+'22';icon.style.color=lv.icol;
+  buildSidebar();buildTP();updateUI();
+  showNews(lv.phases[0].msg,lv.phases[0].tp);
+}
+
+function endRound(){
+  G.paused=true;
+  const next=G.ri+1;
+  const msg=next<LEVELS.length?`关卡${G.ri+1}完成！Pmax触发${G.pmaxN}次，最高连击${G.maxCombo}次\n点击确认进入关卡${next+1}`:`🎉 全部5关完成！Pmax总触发${G.pmaxN}次`;
+  setTimeout(()=>{
+    if(confirm(msg)&&next<LEVELS.length){
+      G.bal=Math.max(G.bal,200);
+      initRound(next);
+      G.paused=false;
+    }
+  },300);
+}
+
+// ── Sidebar toggle ──
+function toggleSB(){
+  document.getElementById('app').classList.toggle('sb-off');
+  setTimeout(rz,230);
+}
+
+// ── Main loop ──
+let last=0;
+function loop(ts){
+  if(!G.paused&&ts-last>=800){
+    last=ts;
+    const c=genCandle(G.price);
+    G.candles.push(c);
+    if(G.candles.length>300)G.candles.shift();
+    G.price=c.c;G.tick++;
+    advPh();chkPmax();
+    if(G.tick%3===0)updateUI();
+    if(G.tick%5===0)buildSidebar();
+  }
+  rz();draw();
+  requestAnimationFrame(loop);
+}
+
+// ── Keyboard ──
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowUp'){e.preventDefault();openPos(5,10,'long');}
+  if(e.key==='ArrowDown'){e.preventDefault();openPos(5,10,'short');}
+  if(e.key==='Escape'){closeAll();}
+});
+
+// ── Boot ──
+window.addEventListener('resize',rz);
+rz();buildTicker();initRound(0);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
