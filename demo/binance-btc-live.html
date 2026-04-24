@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binance BTCUSDT 永续最新成交价</title>
+<style>
+  :root{
+    --bg:#07111a;
+    --panel:#0d1b29;
+    --panel-2:#122538;
+    --line:#22384d;
+    --text:#eef6ff;
+    --muted:#8ea6bd;
+    --accent:#f0b90b;
+    --green:#20c997;
+    --red:#ff6b6b;
+    --amber:#ffb454;
+    --shadow:0 24px 80px rgba(0,0,0,.38);
+  }
+
+  *{box-sizing:border-box}
+
+  html,body{
+    margin:0;
+    min-height:100%;
+    font-family:"SF Pro Display","Segoe UI",sans-serif;
+    color:var(--text);
+    background:
+      radial-gradient(circle at top left, rgba(240,185,11,.18), transparent 24%),
+      radial-gradient(circle at bottom right, rgba(32,201,151,.14), transparent 30%),
+      linear-gradient(180deg, #050b12 0%, var(--bg) 100%);
+  }
+
+  body{
+    display:grid;
+    place-items:center;
+    padding:24px;
+  }
+
+  .shell{
+    width:min(960px, 100%);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:28px;
+    background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    backdrop-filter:blur(10px);
+  }
+
+  .hero{
+    padding:28px 28px 16px;
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+
+  .eyebrow{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    border-radius:999px;
+    background:rgba(240,185,11,.12);
+    color:var(--accent);
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+  }
+
+  .eyebrow::before{
+    content:"";
+    width:8px;
+    height:8px;
+    border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 14px currentColor;
+  }
+
+  h1{
+    margin:18px 0 10px;
+    font-size:clamp(34px, 8vw, 72px);
+    line-height:.98;
+    letter-spacing:-.04em;
+  }
+
+  .subtitle{
+    margin:0;
+    color:var(--muted);
+    font-size:16px;
+    line-height:1.65;
+    max-width:680px;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:2fr 1fr;
+    gap:16px;
+    padding:20px 24px 24px;
+  }
+
+  .card{
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:22px;
+    background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018));
+    padding:20px;
+  }
+
+  .label{
+    color:var(--muted);
+    font-size:12px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+  }
+
+  .price-card{
+    min-height:340px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    background:
+      radial-gradient(circle at right top, rgba(240,185,11,.13), transparent 32%),
+      linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02));
+  }
+
+  .symbol{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:16px;
+    font-size:15px;
+    font-weight:700;
+  }
+
+  .symbol-badge{
+    width:36px;
+    height:36px;
+    display:grid;
+    place-items:center;
+    border-radius:12px;
+    background:rgba(240,185,11,.14);
+    color:var(--accent);
+    font-weight:900;
+  }
+
+  .price{
+    margin:18px 0 8px;
+    font-size:clamp(48px, 9vw, 92px);
+    font-weight:800;
+    line-height:1;
+    letter-spacing:-.05em;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .hint{
+    color:var(--muted);
+    font-size:14px;
+  }
+
+  .pulse-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+
+  .pulse{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 14px;
+    border-radius:999px;
+    background:rgba(32,201,151,.1);
+    color:#cbffef;
+    font-size:14px;
+  }
+
+  .pulse-dot{
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    background:var(--green);
+    box-shadow:0 0 0 rgba(32,201,151,.6);
+    animation:pulse 1.2s infinite;
+  }
+
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(32,201,151,.55)}
+    70%{box-shadow:0 0 0 12px rgba(32,201,151,0)}
+    100%{box-shadow:0 0 0 0 rgba(32,201,151,0)}
+  }
+
+  .stats{
+    display:grid;
+    gap:16px;
+  }
+
+  .stat-value{
+    margin-top:8px;
+    font-size:26px;
+    font-weight:750;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .status-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    margin-top:8px;
+    padding:10px 14px;
+    border-radius:999px;
+    font-size:14px;
+    font-weight:700;
+  }
+
+  .status-chip::before{
+    content:"";
+    width:10px;
+    height:10px;
+    border-radius:50%;
+    background:currentColor;
+  }
+
+  .status-connecting{
+    color:var(--amber);
+    background:rgba(255,180,84,.12);
+  }
+
+  .status-live{
+    color:var(--green);
+    background:rgba(32,201,151,.12);
+  }
+
+  .status-degraded{
+    color:#ffd166;
+    background:rgba(255,209,102,.12);
+  }
+
+  .status-offline{
+    color:var(--red);
+    background:rgba(255,107,107,.12);
+  }
+
+  .stat-copy{
+    margin-top:10px;
+    color:var(--text);
+    font-size:15px;
+    line-height:1.55;
+    word-break:break-word;
+    white-space:pre-wrap;
+  }
+
+  .pulse-rest{
+    background:rgba(255,180,84,.12);
+    color:#ffe3b5;
+  }
+
+  .pulse-rest .pulse-dot{
+    background:var(--amber);
+    box-shadow:0 0 0 rgba(255,180,84,.6);
+  }
+
+  .pulse-offline{
+    background:rgba(255,107,107,.12);
+    color:#ffd3d3;
+  }
+
+  .pulse-offline .pulse-dot{
+    background:var(--red);
+    animation:none;
+    box-shadow:none;
+  }
+
+  .foot{
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    padding:0 24px 22px;
+    color:var(--muted);
+    font-size:13px;
+    flex-wrap:wrap;
+  }
+
+  code{
+    padding:2px 6px;
+    border-radius:8px;
+    border:1px solid rgba(255,255,255,.07);
+    background:rgba(255,255,255,.03);
+    color:var(--text);
+  }
+
+  @media (max-width: 760px){
+    .grid{
+      grid-template-columns:1fr;
+    }
+
+    .price-card{
+      min-height:280px;
+    }
+
+    .hero{
+      padding:22px 20px 14px;
+    }
+
+    .grid{
+      padding:16px 20px 20px;
+    }
+
+    .foot{
+      padding:0 20px 20px;
+    }
+  }
+</style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">Mac 双击打开验证页</div>
+      <h1>BTCUSDT 永续最新成交价</h1>
+      <p class="subtitle">
+        这个页面只连接 Binance <code>BTCUSDT</code> USDT 本位永续，持续显示永续合约的最新成交价。
+        打开后无需命令行或后端服务；若永续 WebSocket 不通，页面会自动降级为永续 REST 轮询；若永续链路整体不可用，则明确显示离线。
+      </p>
+    </section>
+
+    <section class="grid">
+      <article class="card price-card">
+        <div>
+          <div class="label">永续最新成交价</div>
+          <div class="symbol">
+            <span class="symbol-badge">₿</span>
+            <span>BTC / USDT</span>
+          </div>
+          <div class="price" id="price-value">--</div>
+          <div class="hint" id="price-caption">等待 Binance 永续实时成交流...</div>
+        </div>
+
+        <div class="pulse-row">
+          <div class="pulse" id="pulse-chip">
+            <span class="pulse-dot"></span>
+            <span id="pulse-value">最近 1 秒消息数: 0</span>
+          </div>
+        </div>
+      </article>
+
+      <aside class="stats">
+        <section class="card">
+          <div class="label">连接状态</div>
+          <div class="status-chip status-connecting" id="status-chip">连接中</div>
+        </section>
+
+        <section class="card">
+          <div class="label">当前通道</div>
+          <div class="stat-copy" id="channel-value">WebSocket 探测中</div>
+        </section>
+
+        <section class="card">
+          <div class="label">最近更新时间</div>
+          <div class="stat-value" id="updated-at">--:--:--</div>
+        </section>
+
+        <section class="card">
+          <div class="label" id="trade-time-label">最新成交时间</div>
+          <div class="stat-value" id="trade-time">--:--:--</div>
+        </section>
+
+        <section class="card">
+          <div class="label">当前端点</div>
+          <div class="stat-copy" id="endpoint-value">等待选择可用端点</div>
+        </section>
+
+        <section class="card">
+          <div class="label">最近失败原因</div>
+          <div class="stat-copy" id="failure-value">--</div>
+        </section>
+
+        <section class="card">
+          <div class="label">重连次数</div>
+          <div class="stat-value" id="reconnect-count">0</div>
+        </section>
+      </aside>
+    </section>
+
+    <footer class="foot">
+      <span id="source-label">数据源：Binance BTCUSDT USDT 本位永续 WebSocket，失败时自动降级至永续 REST</span>
+      <span id="socket-endpoint">等待选择可用端点</span>
+    </footer>
+  </main>
+
+<script>
+  const WS_ENDPOINTS = [
+    "wss://fstream.binance.com/ws/btcusdt@trade"
+  ];
+  const REST_ENDPOINTS = [
+    "https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT"
+  ];
+  const FIRST_PACKET_TIMEOUT_MS = 4000;
+  const STALE_AFTER_MS = 5000;
+  const REST_POLL_MS = 1000;
+  const REST_REQUEST_TIMEOUT_MS = 3500;
+  const WS_RECOVERY_INTERVAL_MS = 15000;
+
+  const els = {
+    price: document.getElementById("price-value"),
+    caption: document.getElementById("price-caption"),
+    status: document.getElementById("status-chip"),
+    channel: document.getElementById("channel-value"),
+    updatedAt: document.getElementById("updated-at"),
+    tradeTimeLabel: document.getElementById("trade-time-label"),
+    tradeTime: document.getElementById("trade-time"),
+    endpoint: document.getElementById("endpoint-value"),
+    failure: document.getElementById("failure-value"),
+    pulseBox: document.getElementById("pulse-chip"),
+    pulse: document.getElementById("pulse-value"),
+    reconnectCount: document.getElementById("reconnect-count"),
+    sourceLabel: document.getElementById("source-label"),
+    footerEndpoint: document.getElementById("socket-endpoint")
+  };
+
+  const state = {
+    socket: null,
+    wsFirstPacketTimer: null,
+    staleTimer: null,
+    restTimer: null,
+    restRecoveryTimer: null,
+    restAbortController: null,
+    restInFlight: false,
+    transportId: 0,
+    activeMode: "connecting",
+    activeEndpoint: "等待选择可用端点",
+    wsProbeOrigin: "startup",
+    lastTradeAt: 0,
+    lastRestAt: 0,
+    reconnectAttempts: 0,
+    heartbeatCount: 0,
+    heartbeatWindowStart: Date.now()
+  };
+
+  function formatPrice(value){
+    return Number(value).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function formatClock(ms){
+    return new Date(ms).toLocaleTimeString("zh-CN", {
+      hour12: false
+    });
+  }
+
+  function setCaption(text){
+    els.caption.textContent = text;
+  }
+
+  function setStatus(type, text){
+    els.status.className = "status-chip";
+    els.status.classList.add("status-" + type);
+    els.status.textContent = text;
+  }
+
+  function setChannel(text){
+    els.channel.textContent = text;
+  }
+
+  function setTradeField(label, value){
+    els.tradeTimeLabel.textContent = label;
+    els.tradeTime.textContent = value;
+  }
+
+  function setActiveEndpoint(text){
+    const value = text || "等待选择可用端点";
+    state.activeEndpoint = value;
+    els.endpoint.textContent = value;
+    els.footerEndpoint.textContent = value;
+  }
+
+  function setFailure(text){
+    els.failure.textContent = text || "--";
+  }
+
+  function setSource(text){
+    els.sourceLabel.textContent = text;
+  }
+
+  function bumpReconnect(){
+    state.reconnectAttempts += 1;
+    els.reconnectCount.textContent = String(state.reconnectAttempts);
+  }
+
+  function setPulseMode(mode){
+    els.pulseBox.className = "pulse";
+    if (mode === "rest") {
+      els.pulseBox.classList.add("pulse-rest");
+    } else if (mode === "offline") {
+      els.pulseBox.classList.add("pulse-offline");
+    }
+  }
+
+  function renderPulse(now = Date.now()){
+    if (state.activeMode === "ws") {
+      if (now - state.heartbeatWindowStart >= 1000) {
+        state.heartbeatCount = 0;
+        state.heartbeatWindowStart = now;
+      }
+      setPulseMode("ws");
+      els.pulse.textContent = "最近 1 秒消息数: " + state.heartbeatCount;
+      return;
+    }
+
+    if (state.activeMode === "rest") {
+      setPulseMode("rest");
+      els.pulse.textContent = "当前模式: 永续 REST 轮询";
+      return;
+    }
+
+    if (state.activeMode === "offline") {
+      setPulseMode("offline");
+      els.pulse.textContent = "当前模式: 离线";
+      return;
+    }
+
+    setPulseMode("rest");
+    els.pulse.textContent = "当前模式: WebSocket 探测中";
+  }
+
+  function markFreshWsMessage(){
+    const now = Date.now();
+    if (now - state.heartbeatWindowStart >= 1000) {
+      state.heartbeatWindowStart = now;
+      state.heartbeatCount = 0;
+    }
+    state.heartbeatCount += 1;
+    renderPulse(now);
+  }
+
+  function clearWsTimers(){
+    if (state.wsFirstPacketTimer) {
+      window.clearTimeout(state.wsFirstPacketTimer);
+      state.wsFirstPacketTimer = null;
+    }
+    if (state.staleTimer) {
+      window.clearInterval(state.staleTimer);
+      state.staleTimer = null;
+    }
+  }
+
+  function clearRestTimers(){
+    if (state.restTimer) {
+      window.clearInterval(state.restTimer);
+      state.restTimer = null;
+    }
+    if (state.restRecoveryTimer) {
+      window.clearTimeout(state.restRecoveryTimer);
+      state.restRecoveryTimer = null;
+    }
+    if (state.restAbortController) {
+      state.restAbortController.abort();
+      state.restAbortController = null;
+    }
+    state.restInFlight = false;
+  }
+
+  function disconnectSocket(){
+    if (!state.socket) return;
+    state.socket.onopen = null;
+    state.socket.onmessage = null;
+    state.socket.onerror = null;
+    state.socket.onclose = null;
+    state.socket.close();
+    state.socket = null;
+  }
+
+  function stopAllTransports(){
+    clearWsTimers();
+    clearRestTimers();
+    disconnectSocket();
+  }
+
+  function startWsStaleWatch(candidateId, wsIndex, endpoint){
+    if (state.staleTimer) return;
+    state.staleTimer = window.setInterval(() => {
+      const now = Date.now();
+      renderPulse(now);
+      if (state.transportId !== candidateId) return;
+      if (state.activeMode === "ws" && state.lastTradeAt && now - state.lastTradeAt > STALE_AFTER_MS) {
+        handleWsFailure(candidateId, wsIndex, endpoint, "超过 5 秒没有新成交，切换通道");
+      }
+    }, 500);
+  }
+
+  function formatFailure(endpoint, reason){
+    return reason + "\n" + endpoint;
+  }
+
+  function updatePrice(price){
+    els.price.textContent = "$" + formatPrice(price);
+  }
+
+  function handleTradeMessage(payload, endpoint, candidateId, wsIndex){
+    if (state.transportId !== candidateId) return;
+    if (!payload || payload.e !== "trade" || !payload.p || !payload.T) return;
+
+    clearWsTimers();
+    startWsStaleWatch(candidateId, wsIndex, endpoint);
+
+    state.activeMode = "ws";
+    state.lastTradeAt = Date.now();
+    markFreshWsMessage();
+
+    updatePrice(payload.p);
+    els.updatedAt.textContent = formatClock(state.lastTradeAt);
+    setTradeField("最新成交时间", formatClock(payload.T));
+    setStatus("live", "实时");
+    setChannel("WebSocket 实时");
+    setActiveEndpoint(endpoint);
+    setSource("数据源：Binance BTCUSDT USDT 本位永续 WebSocket 实时");
+    setCaption("最新成交价来自 Binance 永续 WebSocket 实时成交流");
+  }
+
+  function handleWsFailure(candidateId, wsIndex, endpoint, reason){
+    if (state.transportId !== candidateId) return;
+
+    bumpReconnect();
+    setFailure(formatFailure(endpoint, reason));
+    clearWsTimers();
+    disconnectSocket();
+
+    const nextIndex = wsIndex + 1;
+    if (nextIndex < WS_ENDPOINTS.length) {
+      setStatus("connecting", "连接中");
+      setChannel("WebSocket 探测中");
+      setCaption(reason + "，切换下一个永续端点...");
+      beginWsCandidate(nextIndex, state.wsProbeOrigin);
+      return;
+    }
+
+    startRestPolling(
+      state.wsProbeOrigin === "rest-recovery"
+        ? "WebSocket 恢复失败，继续使用永续 REST"
+        : "永续 WebSocket 端点失败，已切换到永续 REST"
+    );
+  }
+
+  async function fetchJson(url){
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), REST_REQUEST_TIMEOUT_MS);
+    state.restAbortController = controller;
+
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return await response.json();
+    } finally {
+      window.clearTimeout(timer);
+      if (state.restAbortController === controller) {
+        state.restAbortController = null;
+      }
+    }
+  }
+
+  function normalizeError(error){
+    if (!error) return "未知错误";
+    if (error.name === "AbortError") return "请求超时";
+    return error.message || "请求失败";
+  }
+
+  async function pollRestOnce(){
+    if ((state.activeMode !== "rest" && state.activeMode !== "offline") || state.restInFlight) return;
+
+    state.restInFlight = true;
+    let lastError = "永续 REST 请求失败";
+    let lastEndpoint = REST_ENDPOINTS[0];
+
+    try {
+      for (const endpoint of REST_ENDPOINTS) {
+        lastEndpoint = endpoint;
+        try {
+          const payload = await fetchJson(endpoint);
+          if (state.activeMode !== "rest" && state.activeMode !== "offline") return;
+          if (!payload || !payload.price) {
+            throw new Error("响应缺少价格");
+          }
+
+          const now = Date.now();
+          state.lastRestAt = now;
+          state.lastTradeAt = now;
+          state.activeMode = "rest";
+          state.heartbeatCount = 0;
+          state.heartbeatWindowStart = now;
+
+          updatePrice(payload.price);
+          els.updatedAt.textContent = formatClock(now);
+          setTradeField("最近获取时间", formatClock(now));
+          setStatus("degraded", "降级运行");
+          setChannel("永续 REST 轮询");
+          setActiveEndpoint(endpoint);
+          setSource("数据源：Binance BTCUSDT USDT 本位永续 REST 轮询");
+          setCaption("永续 WebSocket 暂不可用，当前以永续 REST 获取 BTCUSDT 最新成交价");
+          renderPulse(now);
+          return;
+        } catch (error) {
+          lastError = normalizeError(error);
+        }
+      }
+
+      if (state.activeMode === "rest" || state.activeMode === "offline") {
+        bumpReconnect();
+        state.activeMode = "offline";
+        setStatus("offline", "离线");
+        setChannel("无可用通道");
+        setActiveEndpoint(lastEndpoint);
+        setFailure(formatFailure(lastEndpoint, lastError));
+        setSource("数据源：Binance BTCUSDT USDT 本位永续当前不可用");
+        setCaption("Binance 永续 WebSocket 与 REST 端点当前都不可用");
+        renderPulse();
+      }
+    } finally {
+      state.restInFlight = false;
+    }
+  }
+
+  function scheduleWsRecovery(){
+    if (state.restRecoveryTimer) return;
+    state.restRecoveryTimer = window.setTimeout(() => {
+      state.restRecoveryTimer = null;
+      if (state.activeMode !== "rest" && state.activeMode !== "offline") return;
+      beginWsCandidate(0, "rest-recovery");
+    }, WS_RECOVERY_INTERVAL_MS);
+  }
+
+  function startRestPolling(reason){
+    clearWsTimers();
+    disconnectSocket();
+    clearRestTimers();
+
+    state.activeMode = "rest";
+    setStatus("degraded", "降级运行");
+    setChannel("永续 REST 轮询");
+    setActiveEndpoint("正在尝试 REST 端点\n" + REST_ENDPOINTS[0]);
+    setSource("数据源：Binance BTCUSDT USDT 本位永续 REST 轮询");
+    setCaption(reason || "永续 WebSocket 不可用，已降级到永续 REST");
+    setTradeField("最近获取时间", state.lastRestAt ? formatClock(state.lastRestAt) : "--:--:--");
+    renderPulse();
+
+    pollRestOnce();
+    state.restTimer = window.setInterval(pollRestOnce, REST_POLL_MS);
+    scheduleWsRecovery();
+  }
+
+  function beginWsCandidate(wsIndex, origin = "startup"){
+    clearRestTimers();
+    clearWsTimers();
+    disconnectSocket();
+
+    if (wsIndex === 0) {
+      state.wsProbeOrigin = origin;
+    }
+    if (wsIndex >= WS_ENDPOINTS.length) {
+      startRestPolling(
+        origin === "rest-recovery"
+          ? "WebSocket 恢复失败，继续使用永续 REST"
+          : "永续 WebSocket 端点失败，已切换到永续 REST"
+      );
+      return;
+    }
+
+    const endpoint = WS_ENDPOINTS[wsIndex];
+    const candidateId = ++state.transportId;
+    state.activeMode = "connecting";
+    state.heartbeatCount = 0;
+    state.heartbeatWindowStart = Date.now();
+
+    setStatus("connecting", "连接中");
+    setChannel("WebSocket 探测中");
+    setActiveEndpoint(endpoint);
+    setSource("数据源：Binance BTCUSDT USDT 本位永续 WebSocket 探测中");
+    setCaption(
+      origin === "rest-recovery"
+        ? "正在尝试恢复永续 WebSocket 实时..."
+        : "正在尝试永续 WebSocket 端点 " + (wsIndex + 1) + " / " + WS_ENDPOINTS.length + " ..."
+    );
+    renderPulse();
+
+    try {
+      const socket = new WebSocket(endpoint);
+      state.socket = socket;
+      state.wsFirstPacketTimer = window.setTimeout(() => {
+        handleWsFailure(candidateId, wsIndex, endpoint, "4 秒内未收到首条成交");
+      }, FIRST_PACKET_TIMEOUT_MS);
+
+      socket.onopen = () => {
+        if (state.transportId !== candidateId) return;
+        setCaption("已连接永续端点，等待首条成交消息...");
+      };
+
+      socket.onmessage = (event) => {
+        if (state.transportId !== candidateId) return;
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (error) {
+          return;
+        }
+        handleTradeMessage(payload, endpoint, candidateId, wsIndex);
+      };
+
+      socket.onerror = () => {
+        handleWsFailure(candidateId, wsIndex, endpoint, "WebSocket 连接异常");
+      };
+
+      socket.onclose = () => {
+        handleWsFailure(candidateId, wsIndex, endpoint, "WebSocket 连接关闭");
+      };
+    } catch (error) {
+      bumpReconnect();
+      setFailure(formatFailure(endpoint, normalizeError(error)));
+      beginWsCandidate(wsIndex + 1, origin);
+    }
+  }
+
+  function disconnectPriceFeed(){
+    stopAllTransports();
+  }
+
+  window.addEventListener("beforeunload", disconnectPriceFeed);
+  beginWsCandidate(0);
+</script>
+</body>
+</html>

@@ -836,9 +836,10 @@ a{color:inherit}
       <div class="tb-label">Market</div>
       <div class="tb-price" id="tb-price">$83,000</div>
     </div>
-    <div class="tb-stat">BTC/USDT <b id="tb-change" class="green">+0.00%</b></div>
+    <div class="tb-stat">BTCUSDT 永续 <b id="tb-change" class="green">+0.00%</b></div>
     <div class="tb-sep"></div>
     <div class="tb-center">
+      <div class="tb-chip compact">市场 <b id="tb-market-status" class="gold">连接中</b></div>
       <div class="tb-level" id="tb-level">L1-1</div>
       <div class="tb-chip compact">目标 <b id="tb-target">$15</b></div>
       <div class="tb-chip compact">失败线 <b id="tb-fail" class="red">$0</b></div>
@@ -878,8 +879,8 @@ a{color:inherit}
     <canvas id="chart-canvas"></canvas>
     <div class="chart-overlay">
       <div class="chart-title">
-        <div><b>BTC / USDT</b></div>
-        <div id="chart-regime" class="tb-label" style="margin-top:2px;text-transform:none;letter-spacing:0">自动无限 K 线 · 高频噪声市场</div>
+        <div><b>BTCUSDT 永续</b></div>
+        <div id="chart-regime" class="tb-label" style="margin-top:2px;text-transform:none;letter-spacing:0">Binance BTCUSDT 永续 · 连接中</div>
       </div>
     </div>
     <div id="combo-badge">
@@ -887,8 +888,8 @@ a{color:inherit}
       <div class="cb-l">WIN STREAK</div>
     </div>
     <div class="chart-hint">
-      <div class="hint-pill">自动推进</div>
-      <div class="hint-pill">高低点触发 TP / SL / LIQ</div>
+      <div class="hint-pill">Binance 永续</div>
+      <div class="hint-pill">实时价格触发 TP / SL / LIQ</div>
       <div class="hint-pill">Esc 一键平仓</div>
     </div>
   </main>
@@ -902,8 +903,8 @@ a{color:inherit}
       <button class="pos-tab active" id="tab-open" onclick="switchTab('open')">当前持仓 (<span id="open-count">0</span>)</button>
       <button class="pos-tab" id="tab-hist" onclick="switchTab('history')">历史记录</button>
       <div class="pos-actions">
-        <button class="ghost-btn" onclick="togglePause()">暂停 / 继续</button>
-        <button class="danger-btn" onclick="closeAllManual()">一键平仓</button>
+        <button class="ghost-btn" id="pause-btn-secondary" onclick="togglePause()">暂停 / 继续</button>
+        <button class="danger-btn" id="close-all-btn" onclick="closeAllManual()">一键平仓</button>
       </div>
     </div>
     <div class="pos-head" id="pos-head"></div>
@@ -1067,17 +1068,24 @@ const CARD_LIBRARY = [
 ];
 const STARTER_CARD_IDS = ["m-add-1", "tp-sub-5", "tp-sub-10", "sl-add-5", "fee-sub-1", "profit-add-1"];
 const NEWS_TAPE = [
-  { text: "BTC 高频波动模式开启", tone: "bull" },
+  { text: "Binance BTCUSDT USDT 本位永续驱动当前价格", tone: "bull" },
   { text: "交易所手续费像砂纸一样打磨你的利润", tone: "bear" },
   { text: "5000x 只差一点点价格波动就能结算", tone: "neutral" },
   { text: "止盈收益会先做加算再做乘算", tone: "bull" },
   { text: "过关后立即选牌，构筑决定下关节奏", tone: "neutral" },
-  { text: "自动推进，无限 K 线，无阶段脚本", tone: "neutral" }
+  { text: "市场离线时将停止真实玩法推进", tone: "bear" }
 ];
 const BASE_PRICE = 83000;
 const MIN_RATE = 0.05;
 const TICK_MS = 900;
 const MAX_VISIBLE_CANDLES = 100;
+const FUTURES_WS_ENDPOINTS = ["wss://fstream.binance.com/ws/btcusdt@trade"];
+const FUTURES_REST_ENDPOINTS = ["https://fapi.binance.com/fapi/v1/ticker/price?symbol=BTCUSDT"];
+const FIRST_PACKET_TIMEOUT_MS = 4000;
+const STALE_AFTER_MS = 5000;
+const REST_POLL_MS = 1000;
+const REST_REQUEST_TIMEOUT_MS = 3500;
+const WS_RECOVERY_INTERVAL_MS = 15000;
 
 const els = {};
 let chartCtx = null;
@@ -1154,10 +1162,14 @@ const RunState = {
       candles: [],
       market: {
         tick: 0,
-        drift: 0.00015,
-        shock: 0,
-        volatility: 0.0018,
-        lastMove: 0
+        lastMove: 0,
+        connectionStatus: "connecting",
+        channel: "连接中",
+        endpoint: "",
+        lastError: "",
+        latestPriceAt: 0,
+        lastTradeTime: 0,
+        hasPrice: false
       },
       stats: {
         trades: 0,
@@ -1176,78 +1188,362 @@ const RunState = {
 };
 
 const MarketEngine = {
-  reseed(levelIndex = 0){
-    const state = RunState.game;
-    const offset = (Math.random() - 0.5) * 2200 + levelIndex * 120;
-    state.price = BASE_PRICE + offset;
-    state.market = {
-      tick: 0,
-      drift: 0.00015 + levelIndex * 0.00002,
-      shock: 0,
-      volatility: 0.0018 + levelIndex * 0.00015,
-      lastMove: 0
-    };
-    state.candles = [];
+  runtime: {
+    socket: null,
+    wsFirstPacketTimer: null,
+    staleTimer: null,
+    restTimer: null,
+    restRecoveryTimer: null,
+    restAbortController: null,
+    restInFlight: false,
+    transportId: 0,
+    renderPending: false,
+    currentBucket: null
   },
-  nextCandle(){
+  reseed(){
     const state = RunState.game;
-    const market = state.market;
-    market.tick += 1;
+    const hadLiveMarket = state.market && (state.market.connectionStatus === "live" || state.market.connectionStatus === "rest");
+    const lastPrice = state.market && state.market.hasPrice ? state.price : BASE_PRICE;
+    const lastConnectionStatus = hadLiveMarket ? state.market.connectionStatus : "connecting";
+    const lastChannel = hadLiveMarket ? state.market.channel : "连接中";
+    const lastEndpoint = hadLiveMarket ? state.market.endpoint : "";
+    const lastError = hadLiveMarket ? state.market.lastError : "";
+    const lastPriceAt = hadLiveMarket ? state.market.latestPriceAt : 0;
+    const lastTradeTime = hadLiveMarket ? state.market.lastTradeTime : 0;
 
-    if (Math.random() < 0.08) {
-      market.drift = clamp(market.drift + (Math.random() - 0.5) * 0.0009, -0.0016, 0.0016);
-    }
-    if (Math.random() < 0.05) {
-      market.shock = (Math.random() - 0.5) * (0.002 + Math.random() * 0.0025);
-    } else {
-      market.shock *= 0.32;
-    }
-
-    const open = state.price;
-    const regimeVol = 0.0012 + Math.random() * 0.0025 + Math.abs(market.drift) * 0.6 + Math.abs(market.shock) * 0.7;
-    market.volatility = regimeVol;
-    const move = market.drift + market.shock + (Math.random() - 0.5) * regimeVol * 2.15;
-    let close = open * (1 + move);
-    if (close < 3000) close = 3000;
-
-    const wickFactor = regimeVol * (0.3 + Math.random() * 0.8);
-    const high = Math.max(open, close) * (1 + Math.random() * wickFactor);
-    const low = Math.max(1000, Math.min(open, close) * (1 - Math.random() * wickFactor));
-
-    market.lastMove = move;
-    state.price = close;
-
-    return { open, high, low, close };
+    state.market.tick = 0;
+    state.market.lastMove = 0;
+    state.market.connectionStatus = lastConnectionStatus;
+    state.market.channel = lastChannel;
+    state.market.endpoint = lastEndpoint;
+    state.market.lastError = lastError;
+    state.market.latestPriceAt = lastPriceAt;
+    state.market.lastTradeTime = lastTradeTime;
+    state.market.hasPrice = hadLiveMarket;
+    state.price = lastPrice;
+    state.candles = [];
+    this.runtime.currentBucket = null;
   },
   seedCandles(count = 80){
     const state = RunState.game;
-    for (let i = 0; i < count; i += 1) {
-      const candle = this.nextCandle();
-      state.candles.push(candle);
+    if (!state.market.hasPrice || !Number.isFinite(state.price) || state.price <= 0) {
+      state.candles = [];
+      return;
     }
-    if (state.candles.length > MAX_VISIBLE_CANDLES) {
-      state.candles = state.candles.slice(-MAX_VISIBLE_CANDLES);
+    const safeCount = Math.min(count, MAX_VISIBLE_CANDLES);
+    state.candles = Array.from({ length: safeCount }, () => ({
+      open: state.price,
+      high: state.price,
+      low: state.price,
+      close: state.price
+    }));
+  },
+  clearWsTimers(){
+    if (this.runtime.wsFirstPacketTimer) {
+      clearTimeout(this.runtime.wsFirstPacketTimer);
+      this.runtime.wsFirstPacketTimer = null;
+    }
+    if (this.runtime.staleTimer) {
+      clearInterval(this.runtime.staleTimer);
+      this.runtime.staleTimer = null;
     }
   },
-  step(){
-    const state = RunState.game;
-    if (state.phase !== "playing" || state.paused) return;
-    const candle = this.nextCandle();
-    state.candles.push(candle);
-    if (state.candles.length > MAX_VISIBLE_CANDLES) {
-      state.candles.shift();
+  clearRestTimers(){
+    if (this.runtime.restTimer) {
+      clearInterval(this.runtime.restTimer);
+      this.runtime.restTimer = null;
     }
-    checkAutoExits(candle);
-    checkLevelResult();
-    renderAll();
+    if (this.runtime.restRecoveryTimer) {
+      clearTimeout(this.runtime.restRecoveryTimer);
+      this.runtime.restRecoveryTimer = null;
+    }
+    if (this.runtime.restAbortController) {
+      this.runtime.restAbortController.abort();
+      this.runtime.restAbortController = null;
+    }
+    this.runtime.restInFlight = false;
+  },
+  disconnectSocket(){
+    if (!this.runtime.socket) return;
+    this.runtime.socket.onopen = null;
+    this.runtime.socket.onmessage = null;
+    this.runtime.socket.onerror = null;
+    this.runtime.socket.onclose = null;
+    this.runtime.socket.close();
+    this.runtime.socket = null;
+  },
+  stop(){
+    this.clearWsTimers();
+    this.clearRestTimers();
+    this.disconnectSocket();
+    this.runtime.currentBucket = null;
+  },
+  connect(){
+    this.stop();
+    this.beginWsCandidate(0, "startup");
+    this.scheduleRender();
+  },
+  isSessionAvailable(){
+    const status = RunState.game.market.connectionStatus;
+    return status === "live" || status === "rest";
+  },
+  hasExecutablePrice(){
+    const market = RunState.game.market;
+    return market.hasPrice && this.isSessionAvailable();
+  },
+  canTrade(){
+    const state = RunState.game;
+    return state.phase === "playing" && !state.paused && this.hasExecutablePrice();
+  },
+  statusLabel(){
+    const status = RunState.game.market.connectionStatus;
+    if (status === "live") return "实时";
+    if (status === "rest") return "降级运行";
+    if (status === "offline") return "离线";
+    return "连接中";
+  },
+  statusToneClass(){
+    const status = RunState.game.market.connectionStatus;
+    if (status === "live") return "green";
+    if (status === "offline") return "red";
+    return "gold";
   },
   regimeLabel(){
     const market = RunState.game.market;
-    if (Math.abs(market.shock) > 0.0018) return "插针风暴 · 极端波动";
-    if (market.drift > 0.0007) return "趋势上行 · 多头惯性";
-    if (market.drift < -0.0007) return "趋势下行 · 空头惯性";
-    if (market.volatility > 0.0031) return "高噪音震荡 · 适合超高杠杆";
-    return "自动无限 K 线 · 高频噪声市场";
+    if (market.connectionStatus === "live") return "Binance BTCUSDT 永续 · WebSocket 实时";
+    if (market.connectionStatus === "rest") return "Binance BTCUSDT 永续 · REST 轮询";
+    if (market.connectionStatus === "offline") return "Binance BTCUSDT 永续 · 离线";
+    return "Binance BTCUSDT 永续 · 连接中";
+  },
+  scheduleRender(){
+    if (this.runtime.renderPending) return;
+    this.runtime.renderPending = true;
+    requestAnimationFrame(() => {
+      this.runtime.renderPending = false;
+      renderNewsFeed();
+      renderAll();
+    });
+  },
+  updateBucket(price){
+    if (!this.runtime.currentBucket) {
+      this.runtime.currentBucket = { open: price, high: price, low: price, close: price };
+      return;
+    }
+    this.runtime.currentBucket.high = Math.max(this.runtime.currentBucket.high, price);
+    this.runtime.currentBucket.low = Math.min(this.runtime.currentBucket.low, price);
+    this.runtime.currentBucket.close = price;
+  },
+  finalizeBucket(){
+    const state = RunState.game;
+    if (!state.market.hasPrice || !this.isSessionAvailable()) return;
+    if (!this.runtime.currentBucket) {
+      this.runtime.currentBucket = {
+        open: state.price,
+        high: state.price,
+        low: state.price,
+        close: state.price
+      };
+    }
+    state.candles.push({ ...this.runtime.currentBucket });
+    if (state.candles.length > MAX_VISIBLE_CANDLES) {
+      state.candles.shift();
+    }
+    state.market.tick += 1;
+    this.runtime.currentBucket = {
+      open: state.price,
+      high: state.price,
+      low: state.price,
+      close: state.price
+    };
+  },
+  applyPrice(price, tradeTime, endpoint, status, channel){
+    const state = RunState.game;
+    const hadPrice = state.market.hasPrice && Number.isFinite(state.price) && state.price > 0;
+    const previous = hadPrice ? state.price : price;
+    state.price = price;
+    state.market.hasPrice = true;
+    state.market.lastMove = hadPrice ? (price - previous) / (previous || price) : 0;
+    state.market.latestPriceAt = Date.now();
+    state.market.lastTradeTime = tradeTime || state.market.latestPriceAt;
+    state.market.connectionStatus = status;
+    state.market.channel = channel;
+    state.market.endpoint = endpoint;
+    state.market.lastError = "";
+    if (!state.candles.length) {
+      this.seedCandles(80);
+    }
+    this.updateBucket(price);
+    if (state.phase === "playing") {
+      TradeEngine.checkAutoExitsAtPrice(price);
+      checkLevelResult();
+    }
+    this.scheduleRender();
+  },
+  handleTradeMessage(payload, endpoint, candidateId, wsIndex){
+    if (this.runtime.transportId !== candidateId) return;
+    if (!payload || payload.e !== "trade" || !payload.p || !payload.T) return;
+    this.clearWsTimers();
+    this.startWsStaleWatch(candidateId, wsIndex, endpoint);
+    this.applyPrice(Number(payload.p), payload.T, endpoint, "live", "WebSocket 实时");
+  },
+  startWsStaleWatch(candidateId, wsIndex, endpoint){
+    if (this.runtime.staleTimer) return;
+    this.runtime.staleTimer = setInterval(() => {
+      const state = RunState.game;
+      if (this.runtime.transportId !== candidateId) return;
+      if (state.market.connectionStatus !== "live" || !state.market.latestPriceAt) return;
+      if (Date.now() - state.market.latestPriceAt > STALE_AFTER_MS) {
+        this.handleWsFailure(candidateId, wsIndex, endpoint, "超过 5 秒没有新的永续成交");
+      }
+    }, 500);
+  },
+  handleWsFailure(candidateId, wsIndex, endpoint, reason){
+    if (this.runtime.transportId !== candidateId) return;
+    const state = RunState.game;
+    state.market.lastError = reason;
+    state.market.endpoint = endpoint;
+    this.clearWsTimers();
+    this.disconnectSocket();
+    const nextIndex = wsIndex + 1;
+    if (nextIndex < FUTURES_WS_ENDPOINTS.length) {
+      this.beginWsCandidate(nextIndex, "retry");
+      return;
+    }
+    this.startRestPolling(reason);
+  },
+  normalizeError(error){
+    if (!error) return "未知错误";
+    if (error.name === "AbortError") return "请求超时";
+    return error.message || "请求失败";
+  },
+  async fetchJson(url){
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REST_REQUEST_TIMEOUT_MS);
+    this.runtime.restAbortController = controller;
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+      if (this.runtime.restAbortController === controller) {
+        this.runtime.restAbortController = null;
+      }
+    }
+  },
+  async pollRestOnce(){
+    const market = RunState.game.market;
+    if ((market.connectionStatus !== "rest" && market.connectionStatus !== "offline" && market.connectionStatus !== "connecting") || this.runtime.restInFlight) {
+      return;
+    }
+    this.runtime.restInFlight = true;
+    let lastError = "永续 REST 请求失败";
+    let lastEndpoint = FUTURES_REST_ENDPOINTS[0];
+    try {
+      for (const endpoint of FUTURES_REST_ENDPOINTS) {
+        lastEndpoint = endpoint;
+        try {
+          const payload = await this.fetchJson(endpoint);
+          if (!payload || !payload.price) {
+            throw new Error("响应缺少价格");
+          }
+          this.applyPrice(Number(payload.price), Date.now(), endpoint, "rest", "永续 REST 轮询");
+          return;
+        } catch (error) {
+          lastError = this.normalizeError(error);
+        }
+      }
+      const state = RunState.game;
+      state.market.connectionStatus = "offline";
+      state.market.channel = "离线";
+      state.market.endpoint = lastEndpoint;
+      state.market.lastError = lastError;
+      this.scheduleRender();
+    } finally {
+      this.runtime.restInFlight = false;
+    }
+  },
+  scheduleWsRecovery(){
+    if (this.runtime.restRecoveryTimer) return;
+    this.runtime.restRecoveryTimer = setTimeout(() => {
+      this.runtime.restRecoveryTimer = null;
+      const status = RunState.game.market.connectionStatus;
+      if (status !== "rest" && status !== "offline" && status !== "connecting") return;
+      this.beginWsCandidate(0, "rest-recovery");
+    }, WS_RECOVERY_INTERVAL_MS);
+  },
+  startRestPolling(reason){
+    const state = RunState.game;
+    this.clearWsTimers();
+    this.disconnectSocket();
+    this.clearRestTimers();
+    state.market.connectionStatus = "connecting";
+    state.market.channel = "连接中";
+    state.market.endpoint = FUTURES_REST_ENDPOINTS[0];
+    state.market.lastError = reason || "永续 WebSocket 不可用";
+    this.scheduleRender();
+    this.pollRestOnce();
+    this.runtime.restTimer = setInterval(() => this.pollRestOnce(), REST_POLL_MS);
+    this.scheduleWsRecovery();
+  },
+  beginWsCandidate(wsIndex, origin = "startup"){
+    const state = RunState.game;
+    this.clearRestTimers();
+    this.clearWsTimers();
+    this.disconnectSocket();
+    if (wsIndex >= FUTURES_WS_ENDPOINTS.length) {
+      this.startRestPolling(origin === "rest-recovery" ? "永续 WebSocket 恢复失败" : "永续 WebSocket 不可用");
+      return;
+    }
+    const endpoint = FUTURES_WS_ENDPOINTS[wsIndex];
+    const candidateId = ++this.runtime.transportId;
+    state.market.connectionStatus = "connecting";
+    state.market.channel = "连接中";
+    state.market.endpoint = endpoint;
+    if (origin === "startup") {
+      state.market.lastError = "";
+    }
+    this.scheduleRender();
+    try {
+      const socket = new WebSocket(endpoint);
+      this.runtime.socket = socket;
+      this.runtime.wsFirstPacketTimer = setTimeout(() => {
+        this.handleWsFailure(candidateId, wsIndex, endpoint, "4 秒内未收到永续成交");
+      }, FIRST_PACKET_TIMEOUT_MS);
+      socket.onopen = () => {
+        if (this.runtime.transportId !== candidateId) return;
+        this.scheduleRender();
+      };
+      socket.onmessage = (event) => {
+        if (this.runtime.transportId !== candidateId) return;
+        let payload;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (_error) {
+          return;
+        }
+        this.handleTradeMessage(payload, endpoint, candidateId, wsIndex);
+      };
+      socket.onerror = () => {
+        this.handleWsFailure(candidateId, wsIndex, endpoint, "永续 WebSocket 连接异常");
+      };
+      socket.onclose = () => {
+        this.handleWsFailure(candidateId, wsIndex, endpoint, "永续 WebSocket 连接关闭");
+      };
+    } catch (error) {
+      state.market.lastError = this.normalizeError(error);
+      this.startRestPolling("永续 WebSocket 创建失败");
+    }
+  },
+  step(){
+    if (!this.isSessionAvailable() || !RunState.game.market.hasPrice) return;
+    this.finalizeBucket();
+    this.scheduleRender();
   }
 };
 
@@ -1290,6 +1586,10 @@ const TradeEngine = {
   openPosition(leverage, side){
     const state = RunState.game;
     if (state.phase !== "playing") return;
+    if (!MarketEngine.hasExecutablePrice()) {
+      showToast("永续市场未就绪，当前无法开仓", "#4a5357");
+      return;
+    }
     if (state.paused) {
       showToast("已暂停，继续后才能开仓", "#4a5357");
       return;
@@ -1327,6 +1627,10 @@ const TradeEngine = {
   },
   closePosition(id, reason = "manual", exitPrice){
     const state = RunState.game;
+    if (reason === "manual" && !MarketEngine.hasExecutablePrice()) {
+      showToast("永续市场离线，当前无法按真实价格平仓", "#7a2a3d");
+      return null;
+    }
     const index = state.positions.findIndex((pos) => pos.id === id);
     if (index === -1) return null;
     const position = state.positions[index];
@@ -1398,6 +1702,10 @@ const TradeEngine = {
     return { position, reason, tradeNet, returnAmount, closeFee, exit };
   },
   reversePosition(id){
+    if (!MarketEngine.hasExecutablePrice()) {
+      showToast("永续市场离线，当前无法反手", "#7a2a3d");
+      return;
+    }
     const state = RunState.game;
     const position = state.positions.find((item) => item.id === id);
     if (!position) return;
@@ -1412,37 +1720,41 @@ const TradeEngine = {
     checkLevelResult();
   },
   closeAllManual(){
+    if (!MarketEngine.hasExecutablePrice()) {
+      showToast("永续市场离线，当前无法一键平仓", "#7a2a3d");
+      return;
+    }
     const ids = [...RunState.game.positions.map((pos) => pos.id)];
     ids.forEach((id) => this.closePosition(id, "manual"));
     checkLevelResult();
     renderAll();
   },
-  checkAutoExits(candle){
+  checkAutoExitsAtPrice(price){
     const positions = [...RunState.game.positions];
     positions.forEach((position) => {
       if (!RunState.game.positions.find((item) => item.id === position.id)) return;
       if (position.side === "long") {
-        if (candle.high >= position.tpPrice) {
+        if (price >= position.tpPrice) {
           this.closePosition(position.id, "tp", position.tpPrice);
           return;
         }
-        if (candle.low <= position.liqPrice) {
+        if (price <= position.liqPrice) {
           this.closePosition(position.id, "liq", position.liqPrice);
           return;
         }
-        if (candle.low <= position.slPrice) {
+        if (price <= position.slPrice) {
           this.closePosition(position.id, "sl", position.slPrice);
         }
       } else {
-        if (candle.low <= position.tpPrice) {
+        if (price <= position.tpPrice) {
           this.closePosition(position.id, "tp", position.tpPrice);
           return;
         }
-        if (candle.high >= position.liqPrice) {
+        if (price >= position.liqPrice) {
           this.closePosition(position.id, "liq", position.liqPrice);
           return;
         }
-        if (candle.high >= position.slPrice) {
+        if (price >= position.slPrice) {
           this.closePosition(position.id, "sl", position.slPrice);
         }
       }
@@ -1566,20 +1878,29 @@ const UIRenderer = {
   renderTopbar(){
     const state = RunState.game;
     const level = currentLevel();
-    els.tbPrice.textContent = fmtUsd(state.price, 0);
+    els.tbPrice.textContent = state.market.hasPrice ? fmtUsd(state.price, 0) : "--";
     els.tbLevel.textContent = level.id;
     els.tbTarget.textContent = fmtMargin(level.target);
     els.tbFail.textContent = fmtMargin(level.failAt);
     els.tbBalance.textContent = fmtUsd(state.balance);
     els.tbFees.textContent = fmtUsd(state.feesPaid);
-    const move = state.market.lastMove * 100;
-    els.tbChange.textContent = (move >= 0 ? "+" : "") + move.toFixed(2) + "%";
-    els.tbChange.className = move >= 0 ? "green" : "red";
+    if (state.market.hasPrice) {
+      const move = state.market.lastMove * 100;
+      els.tbChange.textContent = (move >= 0 ? "+" : "") + move.toFixed(2) + "%";
+      els.tbChange.className = move >= 0 ? "green" : "red";
+    } else {
+      els.tbChange.textContent = "--";
+      els.tbChange.className = "gold";
+    }
+    els.tbMarketStatus.textContent = MarketEngine.statusLabel();
+    els.tbMarketStatus.className = MarketEngine.statusToneClass();
 
     const floating = state.positions.reduce((sum, position) => sum + TradeEngine.estimateCloseNet(position), 0);
     els.tbFloat.textContent = fmtSignedUsd(floating);
     els.tbFloat.className = floating >= 0 ? "green" : "red";
     els.pauseBtn.textContent = state.paused ? "继续" : "暂停";
+    els.pauseBtn.disabled = state.phase !== "playing" || !MarketEngine.isSessionAvailable();
+    els.pauseBtnSecondary.disabled = state.phase !== "playing" || !MarketEngine.isSessionAvailable();
   },
   renderHud(){
     const state = RunState.game;
@@ -1620,8 +1941,8 @@ const UIRenderer = {
     els.tpMetaLine.textContent = "TP " + fmtPct(state.tpRate) + " · SL " + fmtPct(state.slRate) + " · Fee " + fmtPct(state.feeRate) + " × 2 · 保证金 " + fmtMargin(state.maxMargin) + " · 开仓成本 " + fmtUsd(cost.total);
     els.tpCapText.textContent = "多空各自最多 6 仓";
     els.tpRows.innerHTML = LEVERAGES.map((lev) => {
-      const disableLong = state.phase !== "playing" || state.paused || !TradeEngine.canAfford() || TradeEngine.entryCount("long") >= 6;
-      const disableShort = state.phase !== "playing" || state.paused || !TradeEngine.canAfford() || TradeEngine.entryCount("short") >= 6;
+      const disableLong = !MarketEngine.canTrade() || !TradeEngine.canAfford() || TradeEngine.entryCount("long") >= 6;
+      const disableShort = !MarketEngine.canTrade() || !TradeEngine.canAfford() || TradeEngine.entryCount("short") >= 6;
       const tpMove = fmtPct(state.tpRate / lev, 3);
       const slMove = fmtPct(state.slRate / lev, 3);
       return `
@@ -1641,9 +1962,11 @@ const UIRenderer = {
   },
   renderBottomBar(){
     const state = RunState.game;
+    const canManagePositions = MarketEngine.hasExecutablePrice();
     els.openCount.textContent = state.positions.length;
     els.tabOpen.classList.toggle("active", state.tab === "open");
     els.tabHist.classList.toggle("active", state.tab === "history");
+    els.closeAllBtn.disabled = !state.positions.length || !canManagePositions;
 
     if (state.tab === "open") {
       els.posHead.className = "pos-head open";
@@ -1664,8 +1987,8 @@ const UIRenderer = {
             <div class="pos-cell ${pnlClass}">${fmtSignedUsd(net)}<span class="pos-sub">${pct >= 0 ? "+" : ""}${pct}%</span></div>
             <div class="pos-cell"><span class="green">${fmtUsd(position.tpPrice, 0)}</span><span class="pos-sub red">${fmtUsd(position.slPrice, 0)}</span></div>
             <div class="row-actions">
-              <button class="ghost-btn" onclick="reversePosition(${position.id})">反手</button>
-              <button class="danger-btn" onclick="closePosition(${position.id}, 'manual')">平仓</button>
+              <button class="ghost-btn" onclick="reversePosition(${position.id})" ${canManagePositions ? "" : "disabled"}>反手</button>
+              <button class="danger-btn" onclick="closePosition(${position.id}, 'manual')" ${canManagePositions ? "" : "disabled"}>平仓</button>
             </div>
           </div>
         `;
@@ -1694,6 +2017,7 @@ const UIRenderer = {
   renderChart(){
     const state = RunState.game;
     const candles = state.candles.slice(-MAX_VISIBLE_CANDLES);
+    els.chartRegime.textContent = MarketEngine.regimeLabel();
     if (!candles.length) return;
 
     const canvas = els.chartCanvas;
@@ -1818,7 +2142,6 @@ const UIRenderer = {
     chartCtx.fillStyle = "rgba(255,229,106,.9)";
     chartCtx.font = "bold 11px 'Noto Sans SC'";
     chartCtx.fillText(fmtUsd(state.price, 0), width - 84, currentY + 4);
-    els.chartRegime.textContent = MarketEngine.regimeLabel();
   },
   renderCombo(){
     const combo = RunState.game.stats.combo;
@@ -1834,6 +2157,7 @@ const UIRenderer = {
 function cacheElements(){
   els.tbPrice = $("tb-price");
   els.tbChange = $("tb-change");
+  els.tbMarketStatus = $("tb-market-status");
   els.tbLevel = $("tb-level");
   els.tbTarget = $("tb-target");
   els.tbFail = $("tb-fail");
@@ -1841,6 +2165,8 @@ function cacheElements(){
   els.tbFloat = $("tb-float");
   els.tbFees = $("tb-fees");
   els.pauseBtn = $("pause-btn");
+  els.pauseBtnSecondary = $("pause-btn-secondary");
+  els.closeAllBtn = $("close-all-btn");
 
   els.hudStage = $("hud-stage");
   els.hudLevelTitle = $("hud-level-title");
@@ -1912,10 +2238,16 @@ function renderNewsFeed(){
   const level = currentLevel();
   const state = RunState.game;
   const dynamic = [
+    { text: "市场状态 " + MarketEngine.regimeLabel(), tone: state.market.connectionStatus === "offline" ? "bear" : state.market.connectionStatus === "rest" ? "neutral" : "bull" },
+    { text: "当前通道 " + (state.market.channel || "连接中"), tone: state.market.connectionStatus === "offline" ? "bear" : "neutral" },
+    { text: "当前端点 " + (state.market.endpoint || "等待连接"), tone: "neutral" },
     { text: level.id + " 目标 " + fmtMargin(level.target) + " / 失败线 " + fmtMargin(level.failAt), tone: "neutral" },
     { text: "当前参数：TP " + fmtPct(state.tpRate) + " · SL " + fmtPct(state.slRate) + " · Fee " + fmtPct(state.feeRate), tone: "neutral" },
     { text: "最大保证金 " + fmtMargin(state.maxMargin) + " · 收益 +" + state.profitAdd + "x · ×" + state.profitMul, tone: "bull" }
   ];
+  if (state.market.lastError) {
+    dynamic.push({ text: "最近错误：" + state.market.lastError, tone: "bear" });
+  }
   const items = [...NEWS_TAPE, ...dynamic];
   const tape = [...items, ...items].map((item) => `<span class="${item.tone}">● ${item.text}</span>`).join("&nbsp;&nbsp;&nbsp;&nbsp;");
   els.newsScroll = els.newsScroll || $("news-scroll");
@@ -2070,12 +2402,14 @@ function flashLiquidation(){
 }
 
 function initGame(){
+  MarketEngine.stop();
   RunState.reset();
   closeShopModal();
   els.failModal.classList.remove("show");
   els.completeModal.classList.remove("show");
   MarketEngine.reseed(0);
   MarketEngine.seedCandles(80);
+  MarketEngine.connect();
   renderNewsFeed();
   LevelFlow.openStarterShop();
   runSanityChecks();
@@ -2096,7 +2430,7 @@ function stopTick(){
 }
 
 function nextCandle(){
-  return MarketEngine.nextCandle();
+  return MarketEngine.runtime.currentBucket ? { ...MarketEngine.runtime.currentBucket } : null;
 }
 
 function openPosition(leverage, side){
@@ -2119,7 +2453,7 @@ function closeAllManual(){
 }
 
 function checkAutoExits(candle){
-  TradeEngine.checkAutoExits(candle);
+  TradeEngine.checkAutoExitsAtPrice(candle?.close ?? RunState.game.price);
 }
 
 function checkLevelResult(){
@@ -2173,6 +2507,10 @@ function switchTab(tab){
 function togglePause(){
   const state = RunState.game;
   if (state.phase !== "playing") return;
+  if (!MarketEngine.isSessionAvailable()) {
+    showToast("永续市场离线，当前无法切换玩法状态", "#4a5357");
+    return;
+  }
   state.paused = !state.paused;
   renderAll();
 }
@@ -2199,6 +2537,10 @@ function runSanityChecks(){
 
 window.addEventListener("resize", () => {
   renderAll();
+});
+
+window.addEventListener("beforeunload", () => {
+  MarketEngine.stop();
 });
 
 document.addEventListener("keydown", (event) => {
